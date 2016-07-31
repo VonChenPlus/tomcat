@@ -716,13 +716,10 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler,
             }
 
             S socket = wrapper.getSocket();
-            if (socket == null) {
-                // Nothing to do. Socket has been closed.
-                return SocketState.CLOSED;
-            }
 
             Processor processor = connections.get(socket);
-            if (status == SocketEvent.DISCONNECT && processor == null) {
+            if ((status == SocketEvent.DISCONNECT || status == SocketEvent.ERROR)
+                    && processor == null) {
                 // Nothing to do. Endpoint requested a close and there is no
                 // longer a processor associated with this socket.
                 return SocketState.CLOSED;
@@ -883,8 +880,13 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler,
                             ClassLoader oldCL = upgradeToken.getContextBind().bind(false, null);
                             try {
                                 httpUpgradeHandler.destroy();
-                                instanceManager.destroyInstance(httpUpgradeHandler);
                             } finally {
+                                try {
+                                    instanceManager.destroyInstance(httpUpgradeHandler);
+                                } catch (Throwable e) {
+                                    ExceptionUtils.handleThrowable(e);
+                                    getLog().error(sm.getString("abstractConnectionHandler.error"), e);
+                                }
                                 upgradeToken.getContextBind().unbind(false, oldCL);
                             }
                         }
@@ -975,10 +977,8 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler,
         @Override
         public void release(SocketWrapperBase<S> socketWrapper) {
             S socket = socketWrapper.getSocket();
-            if (socket != null) {
-                Processor processor = connections.remove(socket);
-                release(processor);
-            }
+            Processor processor = connections.remove(socket);
+            release(processor);
         }
 
 

@@ -196,8 +196,15 @@ public class Http11Processor extends AbstractProcessor {
     /**
      * Allow a customized the server header for the tin-foil hat folks.
      */
-    protected String server = null;
+    private String server = null;
 
+
+    /*
+     * Should application provider values for the HTTP Server header be removed.
+     * Note that if {@link #server} is set, any application provided vale will
+     * be over-ridden.
+     */
+    private boolean serverRemoveAppProvidedValues = false;
 
     /**
      * Instance of the new protocol to use after the HTTP connection has been
@@ -479,6 +486,11 @@ public class Http11Processor extends AbstractProcessor {
     }
 
 
+    public void setServerRemoveAppProvidedValues(boolean serverRemoveAppProvidedValues) {
+        this.serverRemoveAppProvidedValues = serverRemoveAppProvidedValues;
+    }
+
+
     /**
      * Check if the resource could be compressed, if the client supports it.
      */
@@ -721,10 +733,6 @@ public class Http11Processor extends AbstractProcessor {
             inputBuffer.setSwallowInput(false);
             break;
         }
-        case END_REQUEST: {
-            endRequest();
-            break;
-        }
 
         // Request attribute support
         case REQ_HOST_ADDR_ATTRIBUTE: {
@@ -813,7 +821,7 @@ public class Http11Processor extends AbstractProcessor {
             break;
         }
         case REQ_SSL_CERTIFICATE: {
-            if (sslSupport != null && socketWrapper.getSocket() != null) {
+            if (sslSupport != null) {
                 // Consume and buffer the request body, so that it does not
                 // interfere with the client's handshake messages
                 InputFilter[] inputFilters = inputBuffer.getFilters();
@@ -1105,10 +1113,8 @@ public class Http11Processor extends AbstractProcessor {
                     // set the status to 500 and set the errorException.
                     // If we fail here, then the response is likely already
                     // committed, so we can't try and set headers.
-                    if(keepAlive && !getErrorState().isError() && (
-                            response.getErrorException() != null ||
-                                    (!isAsync() &&
-                                    statusDropsConnection(response.getStatus())))) {
+                    if(keepAlive && !getErrorState().isError() && !isAsync() &&
+                            statusDropsConnection(response.getStatus())) {
                         setErrorState(ErrorState.CLOSE_CLEAN, null);
                     }
                 } catch (InterruptedIOException e) {
@@ -1581,12 +1587,13 @@ public class Http11Processor extends AbstractProcessor {
         outputBuffer.sendStatus();
 
         // Add server header
-        if (server != null) {
-            // Always overrides anything the app might set
+        if (server == null) {
+            if (serverRemoveAppProvidedValues) {
+                headers.removeHeader("server");
+            }
+        } else {
+            // server always overrides anything the app might set
             headers.setValue("Server").setString(server);
-        } else if (headers.getValue("Server") == null) {
-            // If app didn't set the header, use the default
-            outputBuffer.write(Constants.SERVER_BYTES);
         }
 
         int size = headers.size();
@@ -1661,13 +1668,6 @@ public class Http11Processor extends AbstractProcessor {
         }
 
         if (colonPos < 0) {
-            if (!endpoint.isSSLEnabled()) {
-                // 80 - Default HTTP port
-                request.setServerPort(80);
-            } else {
-                // 443 - Default HTTPS port
-                request.setServerPort(443);
-            }
             request.serverName().setChars(hostNameC, 0, valueL);
         } else {
             request.serverName().setChars(hostNameC, 0, colonPos);
@@ -1716,6 +1716,7 @@ public class Http11Processor extends AbstractProcessor {
         if (!keepAlive) {
             return SocketState.CLOSED;
         } else {
+            endRequest();
             inputBuffer.nextRequest();
             outputBuffer.nextRequest();
             if (socketWrapper.isReadPending()) {

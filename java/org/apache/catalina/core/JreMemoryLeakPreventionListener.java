@@ -115,11 +115,11 @@ public class JreMemoryLeakPreventionListener implements LifecycleListener {
     }
 
     /**
-     * XML parsing can pin a web application class loader in memory. This is
-     * particularly nasty as profilers (at least YourKit and Eclipse MAT) don't
-     * identify any GC roots related to this.
-     * <a href="http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6916498">
-     * http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6916498</a>
+     * XML parsing can pin a web application class loader in memory. There are
+     * multiple root causes for this. Some of these are particularly nasty as
+     * profilers may not identify any GC roots related to the leak. For example,
+     * with YourKit you need to ensure that HPROF format memory snapshots are
+     * used to be able to trace some of the leaks.
      */
     private boolean xmlParsingProtection = true;
     public boolean isXmlParsingProtection() { return xmlParsingProtection; }
@@ -193,7 +193,8 @@ public class JreMemoryLeakPreventionListener implements LifecycleListener {
                 }
 
                 // Trigger the creation of the AWT (AWT-Windows, AWT-XAWT,
-                // etc.) thread
+                // etc.) thread.
+                // Note this issue is fixed in Java 8 update 05 onwards.
                 if (awtThreadProtection) {
                     java.awt.Toolkit.getDefaultToolkit();
                 }
@@ -226,16 +227,8 @@ public class JreMemoryLeakPreventionListener implements LifecycleListener {
                             log.debug(sm.getString(
                                     "jreLeakListener.gcDaemonFail"), e);
                         }
-                    } catch (SecurityException e) {
-                        log.error(sm.getString("jreLeakListener.gcDaemonFail"),
-                                e);
-                    } catch (NoSuchMethodException e) {
-                        log.error(sm.getString("jreLeakListener.gcDaemonFail"),
-                                e);
-                    } catch (IllegalArgumentException e) {
-                        log.error(sm.getString("jreLeakListener.gcDaemonFail"),
-                                e);
-                    } catch (IllegalAccessException e) {
+                    } catch (SecurityException | NoSuchMethodException | IllegalArgumentException |
+                            IllegalAccessException e) {
                         log.error(sm.getString("jreLeakListener.gcDaemonFail"),
                                 e);
                     } catch (InvocationTargetException e) {
@@ -286,27 +279,25 @@ public class JreMemoryLeakPreventionListener implements LifecycleListener {
                     }
                 }
 
-                /*
-                 * Various leaks related to the use of XML parsing.
-                 */
                 if (xmlParsingProtection) {
-                    /*
-                     * Haven't got to the root of what is going on with this
-                     * leak but if a web app is the first to make the following
-                     * two calls the web application class loader will be pinned
-                     * in memory.
-                     */
+                    // There are two known issues with XML parsing that affect
+                    // Java 8+. The issues both relate to cached Exception
+                    // instances that retain a link to the TCCL via the
+                    // backtrace field. Note that YourKit only shows this field
+                    // when using the HPROF format memory snapshots.
+                    // https://bz.apache.org/bugzilla/show_bug.cgi?id=58486
                     DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
                     try {
                         DocumentBuilder documentBuilder = factory.newDocumentBuilder();
-                        // Bug 58486 identified two additional memory leaks.
-                        // The first is in DOMSerializerImpl.abort
+                        // Issue 1
+                        // com.sun.org.apache.xml.internal.serialize.DOMSerializerImpl
                         Document document = documentBuilder.newDocument();
                         document.createElement("dummy");
                         DOMImplementationLS implementation =
                                 (DOMImplementationLS)document.getImplementation();
                         implementation.createLSSerializer().writeToString(document);
-                        // The second leak is in DOMNormalizer
+                        // Issue 1
+                        // com.sun.org.apache.xerces.internal.dom.DOMNormalizer
                         document.normalize();
                     } catch (ParserConfigurationException e) {
                         log.error(sm.getString("jreLeakListener.xmlParseFail"),

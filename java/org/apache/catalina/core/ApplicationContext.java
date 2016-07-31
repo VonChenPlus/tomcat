@@ -17,9 +17,11 @@
 package org.apache.catalina.core;
 
 import java.io.InputStream;
+import java.io.UnsupportedEncodingException;
 import java.lang.reflect.InvocationTargetException;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.net.URLDecoder;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumSet;
@@ -410,6 +412,26 @@ public class ApplicationContext implements ServletContext {
         if (normalizedPath == null)
             return (null);
 
+        if (getContext().getDispatchersUseEncodedPaths()) {
+            // Decode
+            String decodedPath;
+            try {
+                decodedPath = URLDecoder.decode(normalizedPath, "UTF-8");
+            } catch (UnsupportedEncodingException e) {
+                // Impossible
+                return null;
+            }
+
+            // Security check to catch attempts to encode /../ sequences
+            normalizedPath = RequestUtil.normalize(decodedPath);
+            if (!decodedPath.equals(normalizedPath)) {
+                getContext().getLogger().warn(
+                        sm.getString("applicationContext.illegalDispatchPath", path),
+                        new IllegalArgumentException());
+                return null;
+            }
+        }
+
         pos = normalizedPath.length();
 
         // Use the thread local URI and mapping data
@@ -463,7 +485,7 @@ public class ApplicationContext implements ServletContext {
 
         mappingData.recycle();
 
-        String encodedUri = URLEncoder.DEFAULT.encode(uriCC.toString());
+        String encodedUri = URLEncoder.DEFAULT.encode(uriCC.toString(), "UTF-8");
 
         // Construct a RequestDispatcher to process this request
         return new ApplicationDispatcher(wrapper, encodedUri, wrapperPath, pathInfo,
@@ -785,16 +807,11 @@ public class ApplicationContext implements ServletContext {
             @SuppressWarnings("unchecked")
             T filter = (T) context.getInstanceManager().newInstance(c.getName());
             return filter;
-        } catch (IllegalAccessException e) {
-            throw new ServletException(e);
         } catch (InvocationTargetException e) {
             ExceptionUtils.handleThrowable(e.getCause());
             throw new ServletException(e);
-        } catch (NamingException e) {
-            throw new ServletException(e);
-        } catch (InstantiationException e) {
-            throw new ServletException(e);
-        } catch (ClassNotFoundException e) {
+        } catch (IllegalAccessException | NamingException | InstantiationException |
+                ClassNotFoundException e) {
             throw new ServletException(e);
         }
     }
@@ -882,16 +899,11 @@ public class ApplicationContext implements ServletContext {
             T servlet = (T) context.getInstanceManager().newInstance(c.getName());
             context.dynamicServletCreated(servlet);
             return servlet;
-        } catch (IllegalAccessException e) {
-            throw new ServletException(e);
         } catch (InvocationTargetException e) {
             ExceptionUtils.handleThrowable(e.getCause());
             throw new ServletException(e);
-        } catch (NamingException e) {
-            throw new ServletException(e);
-        } catch (InstantiationException e) {
-            throw new ServletException(e);
-        } catch (ClassNotFoundException e) {
+        } catch (IllegalAccessException | NamingException | InstantiationException |
+                ClassNotFoundException e) {
             throw new ServletException(e);
         }
     }
@@ -1026,24 +1038,13 @@ public class ApplicationContext implements ServletContext {
                 EventListener listener = (EventListener) obj;
                 addListener(listener);
             }
-        } catch (IllegalAccessException e) {
-            throw new IllegalArgumentException(sm.getString(
-                    "applicationContext.addListener.iae.cnfe", className),
-                    e);
         } catch (InvocationTargetException e) {
             ExceptionUtils.handleThrowable(e.getCause());
             throw new IllegalArgumentException(sm.getString(
                     "applicationContext.addListener.iae.cnfe", className),
                     e);
-        } catch (NamingException e) {
-            throw new IllegalArgumentException(sm.getString(
-                    "applicationContext.addListener.iae.cnfe", className),
-                    e);
-        } catch (InstantiationException e) {
-            throw new IllegalArgumentException(sm.getString(
-                    "applicationContext.addListener.iae.cnfe", className),
-                    e);
-        } catch (ClassNotFoundException e) {
+        } catch (IllegalAccessException | NamingException | InstantiationException |
+                ClassNotFoundException e) {
             throw new IllegalArgumentException(sm.getString(
                     "applicationContext.addListener.iae.cnfe", className),
                     e);
@@ -1112,14 +1113,10 @@ public class ApplicationContext implements ServletContext {
             throw new IllegalArgumentException(sm.getString(
                     "applicationContext.addListener.iae.wrongType",
                     listener.getClass().getName()));
-        } catch (IllegalAccessException e) {
-            throw new ServletException(e);
         } catch (InvocationTargetException e) {
             ExceptionUtils.handleThrowable(e.getCause());
             throw new ServletException(e);
-        } catch (NamingException e) {
-            throw new ServletException(e);
-        } catch (InstantiationException e) {
+        } catch (IllegalAccessException | NamingException | InstantiationException e) {
             throw new ServletException(e);
         }
     }
